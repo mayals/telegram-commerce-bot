@@ -1,25 +1,29 @@
+### This ensures sensitive files like .env, venv, and db.sqlite3 are never pushed to GitHub.
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Virtual environment
 venv/
 env/
+ENV/
+
+# Django
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+*.log
 
 # Environment variables
 .env
-*.env
 
-# Django stuff
-__pycache__/
-*.pyc
-db.sqlite3
-
-# VSCode settings
+# IDEs
 .vscode/
+.idea/
 
-# OS junk
+# OS files
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
-
-# Env files for docker
-.env.*

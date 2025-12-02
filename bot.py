@@ -1,3 +1,5 @@
+# telegram-commerce-bot/bot.py
+
 from PIL import Image
 from io import BytesIO
 import os
@@ -36,22 +38,15 @@ async def get_full_image_url(product):
     return url
 
 async def resize_image_for_telegram(image_path):
-    """
-    Resize image to fit Telegram limits:
-    Minimum 200x200, Maximum 2000x2000
-    Return BytesIO object in JPEG
-    """
     img = Image.open(image_path)
     min_size, max_size = 200, 2000
 
     w, h = img.size
 
-    # Ensure minimum dimensions
     if w < min_size or h < min_size:
         scale = max(min_size / w, min_size / h)
         img = img.resize((int(w*scale), int(h*scale)))
 
-    # Ensure maximum dimensions
     w, h = img.size
     if w > max_size or h > max_size:
         img.thumbnail((max_size, max_size))
@@ -75,6 +70,42 @@ async def shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in cats]
     await update.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ------------------ FIX 1: ADD TO CART HANDLER ------------------
+
+async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    product_id = query.data.split("_")[2]
+    product = await sync_to_async(Product.objects.get)(id=product_id)
+
+    cart = context.user_data.get("cart", [])
+    cart.append(product.id)
+    context.user_data["cart"] = cart
+
+    await query.message.reply_text("🛒 Item added to cart. Use /cart to view it.")
+
+
+# ------------------ FIX 2: BACK TO CATEGORIES HANDLER ------------------
+
+async def back_to_categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    categories = await sync_to_async(list)(Category.objects.all())
+    buttons = [
+        [InlineKeyboardButton(cat.name, callback_data=f"cat_{cat.id}")]
+        for cat in categories
+    ]
+
+    # Send NEW text message (not editing a photo)
+    await query.message.reply_text(
+        "Choose category:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
 
 # ------------------ Callback Handler ------------------
 
@@ -117,13 +148,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # -------- Back to Categories --------
-    if data == "back_cats":
-        cats = await sync_to_async(list)(Category.objects.all())
-        buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in cats]
-        await query.edit_message_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
-        return
-
     # -------- Add to Cart --------
     if data.startswith("add_"):
         prod_id = int(data.split("_", 1)[1])
@@ -131,7 +155,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cart[prod_id] = cart.get(prod_id, 0) + 1
         user_carts[chat_id] = cart
         await query.answer("Added to cart ✅")
-        await query.edit_message_text("Item added to cart. Use /cart to view it.")
+
+        # Send separate message (not editing photo)
+        await query.message.reply_text("🛒 Item added to cart! Use /cart to view it.")
         return
 
     # -------- Cart Controls --------
@@ -152,11 +178,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_cart_message(chat_id, query.message, context)
         return
 
-    # -------- Checkout Instruction --------
     if data == "checkout_now":
         await query.answer()
         await query.message.reply_text("To finish, send:\n/checkout Name;Phone;Address")
         return
+
 
 # ------------------ Cart Helper ------------------
 
@@ -191,6 +217,7 @@ async def send_cart_message(chat_id, message_obj, context):
     except:
         await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=markup)
 
+
 # ------------------ Commands ------------------
 
 async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,7 +242,6 @@ async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Wrong format. Use:\n/checkout Name;Phone;Address")
         return
 
-    # create order
     order = await sync_to_async(Order.objects.create)(
         chat_id=chat_id, customer_name=name, phone=phone, address=address
     )
@@ -232,6 +258,7 @@ async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_carts[chat_id] = {}
     await update.message.reply_text(f"✅ Order placed! Order #{order.id} — Total: ${total}\nMerchant has been notified.")
 
+
 # ------------------ Bot Startup ------------------
 
 def main():
@@ -247,10 +274,12 @@ def main():
     app.add_handler(CommandHandler("shop", shop))
     app.add_handler(CommandHandler("cart", cart_cmd))
     app.add_handler(CommandHandler("checkout", checkout_cmd))
+
+    # FIXED CALLBACKS
+    app.add_handler(CallbackQueryHandler(back_to_categories_handler, pattern="^back_cats$"))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     print("Bot running...")
-    # Run polling (blocking call, async-safe)
     app.run_polling()
 
 if __name__ == "__main__":

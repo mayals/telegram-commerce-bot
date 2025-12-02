@@ -6,8 +6,8 @@ class Category(models.Model):
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
 
-    def __str__(self): return self.name
-
+    def __str__(self):
+        return self.name
 
 
 
@@ -20,8 +20,8 @@ class Product(models.Model):
     image = models.ImageField(upload_to='products/', null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
-    def __str__(self): return self.name
-
+    def __str__(self):
+        return f"{self.name} ({self.price} SAR)"
 
 
 
@@ -33,7 +33,8 @@ class Order(models.Model):
         ('cancelled','Cancelled'),
         ('done','Done'),
     ]
-    chat_id = models.BigIntegerField()   # telegram user chat id
+
+    chat_id = models.BigIntegerField() 
     created_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -41,6 +42,8 @@ class Order(models.Model):
     address = models.TextField(blank=True)
     phone = models.CharField(max_length=40, blank=True)
 
+    def __str__(self):
+        return f"Order #{self.id} - {self.status} - {self.total} SAR"
 
 
 
@@ -48,4 +51,7 @@ class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField(default=1)
-    price = models.DecimalField(max_digits=10, decimal_places=2)  # snapshot
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.quantity} × {self.product.name} (Order #{self.order.id})"

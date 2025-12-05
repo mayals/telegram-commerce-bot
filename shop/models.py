@@ -41,6 +41,7 @@ class Order(models.Model):
     customer_name = models.CharField(max_length=200, blank=True)
     address = models.TextField(blank=True)
     phone = models.CharField(max_length=40, blank=True)
+    email = models.EmailField(blank=True, null=True)  # Add this line
 
     def __str__(self):
         return f"Order #{self.id} - {self.status} - {self.total} SAR"

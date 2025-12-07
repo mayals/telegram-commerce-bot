@@ -1,15 +1,19 @@
 # bot.py
 import os
-import django
 import warnings
 import logging
 from decimal import Decimal
 from io import BytesIO
-
-import stripe
-from PIL import Image
+import requests
 import asyncio
-
+from asgiref.sync import sync_to_async
+#  DJANGO
+import django
+# PILOW
+from PIL import Image
+#  stripe 
+import stripe
+# telegram 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,7 +21,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-from asgiref.sync import sync_to_async
+
 
 # ------------------ Logging ------------------
 logging.basicConfig(level=logging.INFO)
@@ -123,6 +127,10 @@ async def send_cart_message(chat_id: int, message_obj, context):
     except Exception:
         await safe_send_text(chat_id, context, text, reply_markup=markup, parse_mode="Markdown")
 
+
+
+
+
 # ------------------ Commands ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,7 +156,8 @@ async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /checkout Name;Phone;Address[;Email]
-    This command creates an Order in Django, creates Stripe CheckoutSession, and returns session.url
+    Creates a Django Order, posts to the Django endpoint that creates a Stripe Checkout Session,
+    and returns the session.url to the Telegram user.
     """
     chat_id = update.message.chat.id
     cart = user_carts.get(chat_id, {})
@@ -156,8 +165,8 @@ async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_send_text(chat_id, context, "Your cart is empty.")
         return
 
+    # parse command args
     try:
-        # split command text after /checkout
         _, raw = update.message.text.split(" ", 1)
         parts = [x.strip() for x in raw.split(";")]
         if len(parts) == 3:
@@ -171,77 +180,67 @@ async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_send_text(chat_id, context, "Wrong format. Use:\n/checkout Name;Phone;Address[;Email]")
         return
 
-    # create order (sync in thread)
+    # create Order record in Django (in thread)
     order = await sync_to_async(Order.objects.create)(
         chat_id=chat_id, customer_name=name, phone=phone, address=address, email=email
     )
 
-    # create order items
+    # create line items in OrderItem and compute total
     total = Decimal("0.00")
-    line_items = []
     for pid, qty in list(cart.items()):
         try:
             product = await sync_to_async(Product.objects.get)(id=pid)
         except Product.DoesNotExist:
             logger.warning("Product %s not found during checkout", pid)
             continue
+
         subtotal = product.price * qty
         total += subtotal
         await sync_to_async(OrderItem.objects.create)(
             order=order, product=product, quantity=qty, price=product.price
         )
 
-        # Prepare Stripe line_item
-        # Stripe expects amounts in cents (integer)
-        unit_amount = int((product.price * Decimal("100")).quantize(Decimal("1")))
-        line_items.append({
-            "price_data": {
-                "currency": "usd",  # change if needed
-                "product_data": {"name": product.name, "description": product.description or ""},
-                "unit_amount": unit_amount,
-            },
-            "quantity": qty,
-        })
-
-    # save total
     order.total = total
     await sync_to_async(order.save)()
 
-    # Empty cart locally (we will update order status from webhook)
+    # clear local cart (we rely on webhook to update order later)
     user_carts[chat_id] = {}
 
-    # Create Stripe Checkout Session (run blocking stripe call in thread)
-    if not STRIPE_SECRET_KEY:
-        await safe_send_text(chat_id, context, f"✅ Order #{order.id} placed! Total: ${total:.2f}\nBut payments are not configured (STRIPE_SECRET_KEY missing).")
+    # call Django endpoint to create Stripe Checkout session
+    create_url = f"{SITE_URL.rstrip('/')}/payment/create-checkout-session/{order.id}/"
+    try:
+        # POST with a small JSON payload (view doesn't need it, but some servers expect POST with content-type)
+        resp = requests.post(create_url, json={}, timeout=10)
+    except requests.RequestException as e:
+        logger.exception("Failed to reach Django create-checkout-session endpoint: %s", e)
+        await safe_send_text(chat_id, context,
+                             f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
+                             "But I couldn't reach the checkout service. Make sure your Django server is running and accessible.")
         return
 
+    # handle response
     try:
-        def create_session():
-            return stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=line_items,
-                mode="payment",
-                success_url=f"{SITE_URL.rstrip('/')}/payment/stripe-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order.id}",
-                cancel_url=f"{SITE_URL.rstrip('/')}/payment/stripe-cancel?order_id={order.id}",
-                metadata={"order_id": str(order.id)},
-            )
+        data = resp.json()
+    except Exception:
+        data = None
 
-        session = await sync_to_async(create_session)()
+    if resp.status_code in (200, 201) and data and data.get("url"):
+        session_url = data["url"]
+        await safe_send_text(chat_id, context,
+                             f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
+                             f"Pay here: {session_url}")
+        return
 
-        # Save IDs in the order
-        order.stripe_session_id = session.id
-        order.stripe_payment_intent_id = session.payment_intent
-        await sync_to_async(order.save)()
+    # fallback: show useful error info
+    details = ""
+    if data:
+        details = data.get("details") or data.get("error") or data.get("Message") or str(data)
+    else:
+        details = f"HTTP {resp.status_code}: {resp.text[:200]}"
 
-        # send session url
-        pay_url = session.url
-        await safe_send_text(chat_id, context, f"💳 Pay your order #{order.id}: {pay_url}")
-
-    except Exception as e:
-        logger.exception("Unexpected Stripe error")
-        await safe_send_text(chat_id, context, f"Payment error: {str(e)}")
-
-
+    await safe_send_text(chat_id, context,
+                         f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
+                         f"Payment session could not be created.\nError: {details}")
 
 
 

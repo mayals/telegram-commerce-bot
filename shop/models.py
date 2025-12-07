@@ -43,6 +43,14 @@ class Order(models.Model):
     phone = models.CharField(max_length=40, blank=True)
     email = models.EmailField(blank=True, null=True)  # Add this line
 
+    # stripe fields
+    stripe_session_id = models.CharField(
+        max_length=255, blank=True, null=True, help_text="Stripe Checkout Session ID"
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255, blank=True, null=True, help_text="Stripe PaymentIntent ID"
+    )
+    
     def __str__(self):
         return f"Order #{self.id} - {self.status} - {self.total} SAR"
 

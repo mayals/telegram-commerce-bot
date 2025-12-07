@@ -162,3 +162,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 SITE_URL = "http://127.0.0.1:8000"
+
+
+# STRIPE
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+# STRIPE_WEBHOOK_SECRET    -- from Stripe Dashboard > Developers > Webhooks (after you create a webhook endpoint)
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+
+BASE_URL="http://localhost:8000"   # or your production domain
+PAYMENT_CURRENCY="usd"

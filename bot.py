@@ -1,6 +1,5 @@
 # bot.py
 
-# bot.py
 import os
 import django
 import logging

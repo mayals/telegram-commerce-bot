@@ -1,27 +1,20 @@
 # bot.py
+
+# bot.py
 import os
-import warnings
+import django
 import logging
 from decimal import Decimal
 from io import BytesIO
-import requests
-import asyncio
-from asgiref.sync import sync_to_async
-#  DJANGO
-import django
-# PILOW
+
+import httpx
 from PIL import Image
-#  stripe 
-import stripe
-# telegram 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    ConversationHandler, MessageHandler, ContextTypes, filters
 )
-
+from asgiref.sync import sync_to_async
 
 # ------------------ Logging ------------------
 logging.basicConfig(level=logging.INFO)
@@ -32,26 +25,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 from shop.models import Category, Product, Order, OrderItem
 
-# ------------------ Stripe Setup ------------------
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-# print("STRIPE_SECRET_KEY=", STRIPE_SECRET_KEY )
-
-SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")  # used for success/cancel urls
-if not STRIPE_SECRET_KEY:
-    logger.warning("STRIPE_SECRET_KEY not found in env; Stripe payments WILL fail until set.")
-else:
-    stripe.api_key = STRIPE_SECRET_KEY
-
-
-
 # ------------------ Globals ------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")
 user_carts = {}  # {chat_id: {product_id: qty}}
-
-# Suppress PIL DecompressionBomb warnings if desired
-warnings.simplefilter("ignore", Image.DecompressionBombWarning)
-
-
-
 
 # ------------------ Helpers ------------------
 
@@ -74,14 +51,14 @@ async def resize_image_for_telegram(image_path):
         logger.debug("resize_image_for_telegram failed: %s", e)
         return None
 
-async def safe_send_text(chat_id: int, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode=None):
-    """Send a text message, catching & logging errors (async)."""
+async def safe_send_text(chat_id, context: ContextTypes.DEFAULT_TYPE, text, reply_markup=None, parse_mode=None):
+    """Send text safely."""
     try:
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception as e:
         logger.error("Failed to send message to %s: %s", chat_id, e)
 
-async def send_cart_message(chat_id: int, message_obj, context):
+async def send_cart_message(chat_id, message_obj, context):
     """Compose and send/edit cart message."""
     cart = user_carts.get(chat_id, {})
     if not cart:
@@ -95,13 +72,11 @@ async def send_cart_message(chat_id: int, message_obj, context):
     total = Decimal("0.00")
     keyboard = []
 
-    # load product objects
     products = {}
     for pid in list(cart.keys()):
         try:
             products[pid] = await sync_to_async(Product.objects.get)(id=pid)
         except Product.DoesNotExist:
-            logger.warning("Product %s not found while building cart for %s", pid, chat_id)
             cart.pop(pid, None)
 
     for pid, qty in cart.items():
@@ -127,10 +102,6 @@ async def send_cart_message(chat_id: int, message_obj, context):
     except Exception:
         await safe_send_text(chat_id, context, text, reply_markup=markup, parse_mode="Markdown")
 
-
-
-
-
 # ------------------ Commands ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,96 +124,131 @@ async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("Loading cart...")
     await send_cart_message(chat_id, msg, context)
 
-async def checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /checkout Name;Phone;Address[;Email]
-    Creates a Django Order, posts to the Django endpoint that creates a Stripe Checkout Session,
-    and returns the session.url to the Telegram user.
-    """
+# ------------------ Checkout Conversation ------------------
+NAME, PHONE, ADDRESS, EMAIL, CONFIRM = range(5)
+
+async def checkout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     cart = user_carts.get(chat_id, {})
     if not cart:
-        await safe_send_text(chat_id, context, "Your cart is empty.")
-        return
+        await safe_send_text(chat_id, context, "🛒 Your cart is empty. Add products first.")
+        return ConversationHandler.END
+    await safe_send_text(chat_id, context, "Please enter your *full name*:", parse_mode="Markdown")
+    return NAME
 
-    # parse command args
-    try:
-        _, raw = update.message.text.split(" ", 1)
-        parts = [x.strip() for x in raw.split(";")]
-        if len(parts) == 3:
-            name, phone, address = parts
-            email = None
-        elif len(parts) == 4:
-            name, phone, address, email = parts
-        else:
-            raise ValueError("Invalid parts")
-    except Exception:
-        await safe_send_text(chat_id, context, "Wrong format. Use:\n/checkout Name;Phone;Address[;Email]")
-        return
+async def checkout_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text.strip()
+    await safe_send_text(update.message.chat.id, context, "📱 Please enter your phone number:")
+    return PHONE
 
-    # create Order record in Django (in thread)
+async def checkout_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["phone"] = update.message.text.strip()
+    await safe_send_text(update.message.chat.id, context, "📍 Please enter your address:")
+    return ADDRESS
+
+async def checkout_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["address"] = update.message.text.strip()
+    await safe_send_text(update.message.chat.id, context, "📧 (Optional) Enter your email or type /skip")
+    return EMAIL
+
+async def checkout_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["email"] = update.message.text.strip()
+    return await checkout_confirm_msg(update, context)
+
+async def skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["email"] = None
+    return await checkout_confirm_msg(update, context)
+
+async def checkout_confirm_msg(src, context: ContextTypes.DEFAULT_TYPE):
+    data = context.user_data
+    text = (
+        "🧾 **Review Your Information**\n\n"
+        f"👤 Name: {data['name']}\n"
+        f"📱 Phone: {data['phone']}\n"
+        f"📍 Address: {data['address']}\n"
+        f"📧 Email: {data.get('email') or '—'}\n\n"
+        "Is this information correct?"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Yes, proceed", callback_data="confirm_checkout"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel_checkout")
+        ]
+    ])
+    if isinstance(src, Update):
+        await src.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    else:
+        await src.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    return CONFIRM
+
+async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    data = context.user_data
+    cart = user_carts.get(chat_id, {})
+
+    if not cart:
+        await safe_send_text(chat_id, context, "Your cart is empty. Use /shop to start again.")
+        return ConversationHandler.END
+
+    # Create Django Order
     order = await sync_to_async(Order.objects.create)(
-        chat_id=chat_id, customer_name=name, phone=phone, address=address, email=email
+        chat_id=chat_id,
+        customer_name=data["name"],
+        phone=data["phone"],
+        address=data["address"],
+        email=data.get("email")
     )
 
-    # create line items in OrderItem and compute total
     total = Decimal("0.00")
+    line_items = []
     for pid, qty in list(cart.items()):
         try:
             product = await sync_to_async(Product.objects.get)(id=pid)
         except Product.DoesNotExist:
-            logger.warning("Product %s not found during checkout", pid)
             continue
-
         subtotal = product.price * qty
         total += subtotal
         await sync_to_async(OrderItem.objects.create)(
             order=order, product=product, quantity=qty, price=product.price
         )
+        unit_amount = int((product.price * Decimal("100")).quantize(Decimal("1")))
+        line_items.append({
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": product.name, "description": product.description or ""},
+                "unit_amount": unit_amount
+            },
+            "quantity": qty
+        })
 
     order.total = total
     await sync_to_async(order.save)()
-
-    # clear local cart (we rely on webhook to update order later)
     user_carts[chat_id] = {}
 
-    # call Django endpoint to create Stripe Checkout session
-    create_url = f"{SITE_URL.rstrip('/')}/payment/create-checkout-session/{order.id}/"
+    # Call Django create_checkout_session
     try:
-        # POST with a small JSON payload (view doesn't need it, but some servers expect POST with content-type)
-        resp = requests.post(create_url, json={}, timeout=10)
-    except requests.RequestException as e:
-        logger.exception("Failed to reach Django create-checkout-session endpoint: %s", e)
-        await safe_send_text(chat_id, context,
-                             f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
-                             "But I couldn't reach the checkout service. Make sure your Django server is running and accessible.")
-        return
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(f"{SITE_URL}/payment/create-checkout-session/{order.id}/")
+            resp.raise_for_status()
+            data = resp.json()
+            pay_url = data.get("url")
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💳 Pay Now", url=pay_url)
+            ]])
+        await safe_send_text(chat_id, context, f"🛒 Order #{order.id} created! Click below to pay:", reply_markup=keyboard)
+    
+    except Exception as e:
+        await safe_send_text(chat_id, context, f"Payment initiation failed: {str(e)}")
 
-    # handle response
-    try:
-        data = resp.json()
-    except Exception:
-        data = None
-
-    if resp.status_code in (200, 201) and data and data.get("url"):
-        session_url = data["url"]
-        await safe_send_text(chat_id, context,
-                             f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
-                             f"Pay here: {session_url}")
-        return
-
-    # fallback: show useful error info
-    details = ""
-    if data:
-        details = data.get("details") or data.get("error") or data.get("Message") or str(data)
-    else:
-        details = f"HTTP {resp.status_code}: {resp.text[:200]}"
-
-    await safe_send_text(chat_id, context,
-                         f"✅ Order #{order.id} placed! Total: ${total:.2f}\n"
-                         f"Payment session could not be created.\nError: {details}")
+    return ConversationHandler.END
 
 
+
+async def checkout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("Checkout cancelled.")
+    return ConversationHandler.END
 
 # ------------------ Callback Handler ------------------
 
@@ -252,27 +258,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
     data = query.data
 
-    # Category listing
+    # Category
     if data.startswith("cat_"):
-        cat_id = int(data.split("_", 1)[1])
+        cat_id = data.split("_", 1)[1]
         products = await sync_to_async(list)(Product.objects.filter(category_id=cat_id, is_active=True))
         if not products:
             await query.edit_message_text("No products in this category.")
             return
-        buttons = [[InlineKeyboardButton(f"{p.name} — ${p.price}", callback_data=f"prod_{p.id}")] for p in products]
-        await query.edit_message_text("Products:", reply_markup=InlineKeyboardMarkup(buttons))
+        buttons = [[InlineKeyboardButton(f"{p.name} - ${p.price}", callback_data=f"prod_{p.id}")] for p in products]
+        await query.edit_message_text("📦 Products in this category:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # Product detail
+    # Product
     if data.startswith("prod_"):
-        prod_id = int(data.split("_", 1)[1])
+        prod_id = data.split("_", 1)[1]
         product = await sync_to_async(Product.objects.get)(id=prod_id)
         text = f"*{product.name}*\nPrice: ${product.price}\n\n{product.description or ''}"
         buttons = [
             [InlineKeyboardButton("➕ Add to cart", callback_data=f"add_{prod_id}")],
             [InlineKeyboardButton("Back to categories", callback_data="back_cats")]
         ]
-        if product.image and getattr(product.image, "path", None) and os.path.exists(product.image.path):
+        if getattr(product.image, "path", None) and os.path.exists(product.image.path):
             bio = await resize_image_for_telegram(product.image.path)
             if bio:
                 try:
@@ -283,22 +289,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # Add to cart
-    if data.startswith("add_"):
-        prod_id = int(data.split("_", 1)[1])
-        cart = user_carts.get(chat_id, {})
-        cart[prod_id] = cart.get(prod_id, 0) + 1
-        user_carts[chat_id] = cart
-        await query.answer("Added to cart ✅")
-        await safe_send_text(chat_id, context, "🛒 Item added to cart! Use /cart to view it.")
-        return
-
-    # Cart ops
-    if data.startswith(("inc_", "dec_", "rm_")):
+    # Cart operations
+    if data.startswith(("add_", "inc_", "dec_", "rm_")):
         op, prod_id = data.split("_", 1)
-        prod_id = int(prod_id)
+        prod_id = prod_id
         cart = user_carts.get(chat_id, {})
-        if op == "inc":
+        if op == "add" or op == "inc":
             cart[prod_id] = cart.get(prod_id, 0) + 1
         elif op == "dec":
             if cart.get(prod_id, 0) > 1:
@@ -312,43 +308,51 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "checkout_now":
-        await safe_send_text(chat_id, context, "To finish, send:\n/checkout Name;Phone;Address[;Email]")
+        await safe_send_text(chat_id, context, "🛒 To finish checkout, please type /checkout")
         return
 
-# Back to categories
-async def back_to_categories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    categories = await sync_to_async(list)(Category.objects.all())
-    buttons = [[InlineKeyboardButton(cat.name, callback_data=f"cat_{cat.id}")] for cat in categories]
-    await query.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
-
-
-
+    if data == "back_cats":
+        categories = await sync_to_async(list)(Category.objects.all())
+        buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
+        await query.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ------------------ Startup ------------------
 
 def main():
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not found in environment variables. Set BOT_TOKEN and restart.")
+        logger.error("BOT_TOKEN not found in environment variables.")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # commands
+    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("shop", shop))
     app.add_handler(CommandHandler("cart", cart_cmd))
-    app.add_handler(CommandHandler("checkout", checkout_cmd))
 
-    # callbacks
-    app.add_handler(CallbackQueryHandler(back_to_categories_handler, pattern="^back_cats$"))
+    # Checkout conversation
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("checkout", checkout_start)],
+        states={
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_name)],
+            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_phone)],
+            ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_address)],
+            EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_email),
+                CommandHandler("skip", skip_email)
+            ],
+            CONFIRM: [CallbackQueryHandler(checkout_confirm, pattern="^confirm_checkout$"),
+                      CallbackQueryHandler(checkout_cancel, pattern="^cancel_checkout$")]
+        },
+        fallbacks=[CommandHandler("cancel", checkout_cancel)],
+    )
+    app.add_handler(conv_handler)
+
+    # Callback
     app.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("🤖 Bot running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()

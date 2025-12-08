@@ -11,7 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.conf import settings
 
-from shop.models import Order, OrderItem  # adjust if your app name differs
+from shop.models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY") or getattr(settings, "STRIPE_SECRET_KEY", None)
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET") or getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
 BASE_URL = os.getenv("BASE_URL") or getattr(settings, "BASE_URL", "http://localhost:8000")
-print("BASE_URL=",BASE_URL)
 CURRENCY = os.getenv("PAYMENT_CURRENCY", "usd")
 
 if STRIPE_SECRET_KEY:
@@ -36,70 +35,53 @@ else:
 @require_POST
 @csrf_exempt
 def create_checkout_session(request, order_id):
-    """
-    Create a Stripe Checkout session for an existing Order.
-    Expects POST. Returns JSON with {'url': session.url} on success.
-    """
-    # Get order
     try:
         order = Order.objects.get(id=order_id)
     except Order.DoesNotExist:
         return JsonResponse({"error": "Order not found"}, status=404)
 
-    # Compute total
-    total = Decimal(order.total or 0)
-    if total == 0:
-        items = OrderItem.objects.filter(order=order)
-        total = sum((Decimal(item.price) * item.quantity for item in items), Decimal("0.00"))
+    items = OrderItem.objects.filter(order=order)
+    if not items.exists():
+        return JsonResponse({"error": "Order has no items"}, status=400)
 
-    if total <= 0:
-        return JsonResponse({"error": "Order has zero total"}, status=400)
+    line_items = []
+    total = Decimal("0.00")
+    for item in items:
+        subtotal = item.price * item.quantity
+        total += subtotal
+        unit_amount = int((item.price * Decimal("100")).quantize(Decimal("1")))
+        line_items.append({
+            "price_data": {
+                "currency": CURRENCY,
+                "product_data": {
+                    "name": item.product.name,
+                    "description": item.product.description or "",
+                },
+                "unit_amount": unit_amount,
+            },
+            "quantity": item.quantity,
+        })
 
-    # Stripe expects integer amount in cents
-    unit_amount = int((Decimal(str(total)) * Decimal("100")).quantize(Decimal("1")))
+    order.total = total
+    order.save(update_fields=["total"])
 
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": CURRENCY,
-                        "product_data": {"name": f"Order #{order.id}"},
-                        "unit_amount": unit_amount,
-                    },
-                    "quantity": 1,
-                }
-            ],
+            line_items=line_items,
             success_url=f"{BASE_URL}/payment/stripe-success/?session_id={{CHECKOUT_SESSION_ID}}&order_id={order.id}",
             cancel_url=f"{BASE_URL}/payment/stripe-cancel/?order_id={order.id}",
             metadata={"order_id": str(order.id)},
         )
+        if hasattr(order, "stripe_session_id"):
+            order.stripe_session_id = session.id
+            order.save(update_fields=["stripe_session_id"])
     except Exception as e:
         logger.exception("Stripe Checkout Session creation failed: %s", e)
         return JsonResponse({"error": "Failed to create Stripe Checkout session", "details": str(e)}, status=500)
 
-    # Optional: save session ID on order
-    if hasattr(order, "stripe_session_id"):
-        order.stripe_session_id = session.id
-        order.save(update_fields=["stripe_session_id"])
-
     return JsonResponse({"url": session.url, "id": session.id})
-
-
-# -----------------------
-# Success / Cancel views
-# -----------------------
-def stripe_success(request):
-    session_id = request.GET.get("session_id")
-    order_id = request.GET.get("order_id")
-    return JsonResponse({"status": "success", "session_id": session_id, "order_id": order_id})
-
-
-def stripe_cancel(request):
-    order_id = request.GET.get("order_id")
-    return JsonResponse({"status": "cancelled", "order_id": order_id})
 
 
 # -----------------------
@@ -110,34 +92,23 @@ def stripe_webhook(request):
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
 
-    # Verify signature
     if STRIPE_WEBHOOK_SECRET:
         try:
-            event = stripe.Webhook.construct_event(
-                payload=payload,
-                sig_header=sig_header,
-                secret=STRIPE_WEBHOOK_SECRET
-            )
-            logger.info("Stripe webhook received: %s", event["type"])
+            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
         except ValueError:
-            logger.error("Invalid payload")
             return HttpResponseBadRequest("Invalid payload")
         except stripe.error.SignatureVerificationError:
-            logger.error("Invalid signature")
             return HttpResponseForbidden("Invalid signature")
     else:
-        # For local testing only (unverified)
         try:
             event = json.loads(payload)
             logger.warning("Running webhook in UNVERIFIED mode")
         except Exception:
-            logger.exception("Invalid JSON payload")
             return HttpResponseBadRequest("Invalid JSON payload")
 
     data = event.get("data", {}).get("object", {})
     event_type = event.get("type")
 
-    # Checkout completed
     if event_type == "checkout.session.completed":
         metadata = data.get("metadata", {})
         order_id = metadata.get("order_id")
@@ -153,23 +124,43 @@ def stripe_webhook(request):
         order.stripe_session_id = data.get("id")
         order.stripe_payment_intent_id = data.get("payment_intent")
 
-        if data.get("payment_status") == "paid":
-            order.status = "done"
-        else:
-            order.status = "pending"
-
-        order.save()
-        logger.info("Order %s updated to %s", order_id, order.status)
-
-        # Notify Telegram user
+        # Telegram notification
         try:
             from telegram import Bot
             bot = Bot(token=settings.BOT_TOKEN)
-            bot.send_message(
-                chat_id=order.chat_id,
-                text=f"🎉 Payment confirmed!\nYour order #{order.id} is paid successfully."
-            )
+            chat_id = order.chat_id
+
+            if data.get("payment_status") == "paid":
+                order.status = "done"
+                msg_text = (
+                    f"🎉 Payment Success!\n"
+                    f"Your order #{order.id} has been paid successfully.\n"
+                    f"You can continue shopping → /shop"
+                )
+            else:
+                order.status = "pending"
+                msg_text = (
+                    f"⚠️ Payment Failed / Cancelled\n"
+                    f"Don’t worry, you can try again using /checkout\n"
+                    f"Or return to browsing → /shop"
+                )
+
+            order.save(update_fields=["status"])
+            bot.send_message(chat_id=chat_id, text=msg_text)
         except Exception as e:
             logger.error("Failed to notify Telegram user: %s", e)
 
     return HttpResponse(status=200)
+
+
+# -----------------------
+# Success / Cancel endpoints (for browser testing)
+# -----------------------
+def stripe_success(request):
+    session_id = request.GET.get("session_id")
+    order_id = request.GET.get("order_id")
+    return JsonResponse({"status": "success", "session_id": session_id, "order_id": order_id})
+
+def stripe_cancel(request):
+    order_id = request.GET.get("order_id")
+    return JsonResponse({"status": "cancelled", "order_id": order_id})

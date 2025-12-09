@@ -54,7 +54,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     # shop - app 
-    "shop.apps.ShopConfig"
+    "shop.apps.ShopConfig",
+    # payment - app 
+    "payment.apps.PaymentConfig",
+    # delivery - app 
+    "delivery.apps.DeliveryConfig",   
 ]
 
 MIDDLEWARE = [
@@ -158,10 +162,18 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-SITE_URL = "http://127.0.0.1:8000"
+
+SITE_URL ="http://127.0.0.1:8000"
+BASE_URL="http://localhost:8000"   # or your production domain
+
+
+PAYMENT_CURRENCY="usd"
+
+
+# TELEGRAM_BOT
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
 # STRIPE
@@ -171,5 +183,11 @@ STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 
-BASE_URL="http://localhost:8000"   # or your production domain
-PAYMENT_CURRENCY="usd"
+# CELERY
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+

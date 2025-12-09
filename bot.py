@@ -24,10 +24,17 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 from shop.models import Category, Product, Order, OrderItem
 
+
+
+
 # ------------------ Globals ------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")
 user_carts = {}  # {chat_id: {product_id: qty}}
+
+
+
+
 
 # ------------------ Helpers ------------------
 
@@ -50,12 +57,14 @@ async def resize_image_for_telegram(image_path):
         logger.debug("resize_image_for_telegram failed: %s", e)
         return None
 
+
 async def safe_send_text(chat_id, context: ContextTypes.DEFAULT_TYPE, text, reply_markup=None, parse_mode=None):
     """Send text safely."""
     try:
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception as e:
         logger.error("Failed to send message to %s: %s", chat_id, e)
+
 
 async def send_cart_message(chat_id, message_obj, context):
     """Compose and send/edit cart message."""
@@ -101,10 +110,83 @@ async def send_cart_message(chat_id, message_obj, context):
     except Exception:
         await safe_send_text(chat_id, context, text, reply_markup=markup, parse_mode="Markdown")
 
+
+# ------------------ Delivery Helper ------------------
+async def send_delivery_status(chat_id, order_id, context: ContextTypes.DEFAULT_TYPE):
+    from delivery.models import Delivery
+    try:
+        delivery = await sync_to_async(Delivery.objects.get)(order_id=order_id)
+        text = (
+            f"📦 **Order #{order_id} Delivery Status**\n\n"
+            f"Status: {delivery.status}\n"
+            f"Current Location: {delivery.current_location}\n"
+            f"ETA: {delivery.eta or 'Not available'}"
+        )
+        await safe_send_text(chat_id, context, text, parse_mode="Markdown")
+    except Delivery.DoesNotExist:
+        await safe_send_text(chat_id, context, f"🚨 Delivery info not found for Order #{order_id}")
+
+
+
+
+
+
+
 # ------------------ Commands ------------------
 
+# async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     await safe_send_text(update.message.chat.id, context, "👋 Welcome to ShopBot!\nUse /shop to browse categories.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await safe_send_text(update.message.chat.id, context, "👋 Welcome to ShopBot!\nUse /shop to browse categories.")
+    chat_id = update.message.chat.id
+
+    # ---------- 1) Send Shop Logo ----------
+    logo_path = "static/images/logo.jpg"   # put your logo file in static/images folder
+
+    try:
+        if os.path.exists(logo_path):
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=open(logo_path, "rb")
+            )
+    except Exception as e:
+        logger.error(f"Failed to send logo: {e}")
+
+    # ---------- 2) Send Shop Description ----------
+    description = (
+    "🍏 **FreshMart – Your Daily Fresh Market!**\n\n"
+    "We offer the freshest high-quality:\n"
+    "🥬 Vegetables\n"
+    "🍎 Fruits\n"
+    "🥚 Eggs\n"
+    "🥛 Milk\n"
+    "🚰 Water & Beverages\n"
+    "🍞 Bread\n"
+    "🧀 Cheese & Dairy\n"
+    "🍗 Fresh Chicken\n"
+    "🥩 Fresh Meat\n"
+    "🐟 Fish & Seafood\n"
+    "🥫 Canned Goods\n"
+    "🛒 Snacks & Biscuits\n"
+    "🍯 Honey & Jams\n"
+    "🍚 Rice, Grains & Pasta\n"
+    "🧼 Home Essentials\n\n"
+    "Always clean • Always fresh • Always delivered to you 🚚💚"
+    )
+
+    await safe_send_text(chat_id, context, description, parse_mode="Markdown")
+
+    # ---------- 3) Invite user to start shopping ----------
+    welcome = (
+        "👋 *Welcome!* Thank you for visiting FreshMart.\n\n"
+        "🛒 To begin shopping, simply click:\n"
+        "👉 */start*\n"
+        "or type */shop* to browse categories.\n\n"
+        "Happy shopping! 🌿"
+    )
+
+    await safe_send_text(chat_id, context, welcome, parse_mode="Markdown")
+
 
 async def shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cats = await sync_to_async(list)(Category.objects.all())
@@ -180,6 +262,11 @@ async def checkout_confirm_msg(src, context: ContextTypes.DEFAULT_TYPE):
         await src.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
     return CONFIRM
 
+
+
+
+
+
 async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -191,7 +278,7 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_send_text(chat_id, context, "Your cart is empty. Use /shop to start again.")
         return ConversationHandler.END
 
-    # Create Django Order
+    # 1️⃣ Create Django Order
     order = await sync_to_async(Order.objects.create)(
         chat_id=chat_id,
         customer_name=data["name"],
@@ -201,7 +288,6 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     total = Decimal("0.00")
-    line_items = []
     for pid, qty in list(cart.items()):
         try:
             product = await sync_to_async(Product.objects.get)(id=pid)
@@ -212,35 +298,30 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await sync_to_async(OrderItem.objects.create)(
             order=order, product=product, quantity=qty, price=product.price
         )
-        unit_amount = int((product.price * Decimal("100")).quantize(Decimal("1")))
-        line_items.append({
-            "price_data": {
-                "currency": "usd",
-                "product_data": {"name": product.name, "description": product.description or ""},
-                "unit_amount": unit_amount
-            },
-            "quantity": qty
-        })
 
     order.total = total
     await sync_to_async(order.save)()
     user_carts[chat_id] = {}
 
-    # Call Django create_checkout_session
+    # 2️⃣ Call Django create_checkout_session (Stripe)
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(f"{SITE_URL}/payment/create-checkout-session/{order.id}/")
             resp.raise_for_status()
             data = resp.json()
             pay_url = data.get("url")
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💳 Pay Now", url=pay_url)
-            ]])
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Pay Now", url=pay_url)]
+            ])
         await safe_send_text(chat_id, context, f"🛒 Order #{order.id} created! Click below to pay:", reply_markup=keyboard)
-    
+
     except Exception as e:
         await safe_send_text(chat_id, context, f"Payment initiation failed: {str(e)}")
 
     return ConversationHandler.END
+
+
+
 
 
 
@@ -314,6 +395,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         categories = await sync_to_async(list)(Category.objects.all())
         buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
         await query.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    
+    if data.startswith("track_"):
+        order_id = data.split("_")[1]
+        await send_delivery_status(chat_id, order_id, context)
+        return
+
+
+
+
+
 
 # ------------------ Startup ------------------
 

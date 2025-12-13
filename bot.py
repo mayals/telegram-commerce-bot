@@ -322,13 +322,64 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-
-
-
 async def checkout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("Checkout cancelled.")
     return ConversationHandler.END
+
+
+
+
+
+async def track_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_user.id
+
+    order = await sync_to_async(Order.objects.filter(chat_id=chat_id).order_by('-created_at').first)()
+
+    if not order:
+        return await update.message.reply_text("You don’t have any orders yet.")
+
+    status_map = {
+        "pending": "⏳ Waiting for confirmation",
+        "accepted": "🧑‍🍳 Your order is being prepared",
+        "shipped": "🚚 Your order is on the way",
+        "done": "✅ Your order has been delivered",
+        "cancelled": "❌ Your order was cancelled",
+    }
+
+    text = f"""
+                📦 *Order Tracking*
+                Order ID: `{order.id}`
+                Status: {status_map.get(order.status, 'Unknown')}
+                Total: {order.total} SAR
+                Date: {order.created_at.strftime('%Y-%m-%d %H:%M')}
+            """
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+
+async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_user.id
+    orders = await sync_to_async(Order.objects.filter)(chat_id=chat_id)
+
+    if not orders.exists():
+        return await update.message.reply_text("You have no orders yet.")
+
+    msg = "📦 *Your Previous Orders:*\n\n"
+
+    for order in orders.order_by('-created_at')[:10]:
+        msg += f"""
+                    🆔 Order ID: `{order.id}`
+                    Status: {order.status}
+                    Total: {order.total} SAR
+                    Date: {order.created_at.strftime('%Y-%m-%d')}
+                    --------------------------
+                """
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
 
 # ------------------ Callback Handler ------------------
 

@@ -10,3 +10,5 @@ class ShopConfig(AppConfig):
             import shop.signals  # noqa: F401
         except Exception as e:
             print("Error importing shop.signals:", e)
+
+

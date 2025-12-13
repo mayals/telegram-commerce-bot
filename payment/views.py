@@ -4,7 +4,7 @@
 # If the customer closes the browser before reaching the success URL, your server will never be notified.
 
 # payment/views.py
-# payment/views.py
+
 import os
 import stripe
 from django.http import JsonResponse
@@ -13,9 +13,51 @@ from django.conf import settings
 from shop.models import Order, OrderItem
 from shop.tasks import send_telegram_message_task
 from delivery.models import Delivery
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+
+
+# helper function -- build_payment_success_message -- will be used later in stripe_success function
+def build_payment_success_message(order, amount, currency):
+    """
+    Returns (text, reply_markup_json)
+    reply_markup_json is a JSON string ready to send to Telegram (reply_markup field).
+    """
+    text = (
+        "🎉 *Payment Successful!*\n\n"
+        f"🧾 *Order ID:* {order.id}\n"
+        f"💵 *Amount:* {amount} {currency}\n"
+        f"📦 *Status:* Paid\n\n"
+        "You can continue shopping → /shop"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("📦 Track Delivery", callback_data=f"track_{order.id}")],
+        [InlineKeyboardButton("ℹ️ Order Info", callback_data=f"info_{order.id}")],
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    return text, reply_markup.to_json()
+
+
+def build_payment_success_buttons(order_id):
+    """
+    Returns inline buttons for Telegram after payment success
+    """
+    return {
+        "inline_keyboard": [
+            [{"text": "Track Delivery 🚚", "callback_data": f"track_{order_id}"}],
+            [{"text": "View Order Info 🧾", "callback_data": f"info_{order_id}"}],
+            [{"text": "Continue Shopping 🛒", "url": f"{settings.BASE_URL}/shop"}]
+        ]
+    }
+
+
 
 
 # ------------------ CREATE CHECKOUT SESSION ------------------
@@ -85,18 +127,29 @@ def stripe_success(request):
             defaults={"status": "preparing", "current_location": "Warehouse", "eta": None}
         )
 
-        # Prepare Telegram message
-        msg = (
-            f"🎉 *Payment Successful!*\n\n"
-            f"🧾 *Order ID:* {order.id}\n"
-            f"💵 *Amount:* {amount} {currency}\n"
-            f"📦 *Status:* Paid\n\n"
-            f"You can continue shopping → /shop"
+        # Prepare Telegram message with HTML and buttons
+        text = (
+            f"🎉 <b>Payment Successful!</b>\n\n"
+            f"🧾 <b>Order ID:</b> {order.id}\n"
+            f"💵 <b>Amount:</b> {amount} {currency}\n"
+            f"📦 <b>Status:</b> Paid"
         )
 
-        # Send message asynchronously via Celery
-        send_telegram_message_task.delay(chat_id=order.chat_id, text=msg)
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "Track Delivery 🚚", "callback_data": f"track_{order.id}"}],
+                [{"text": "Continue Shopping 🛒", "callback_data": "shop"}]
+            ]
+        }
 
+        send_telegram_message_task.delay(
+            chat_id=order.chat_id,
+            text=text,
+            reply_markup=reply_markup
+        )
+
+
+    # send to display in browser as json
     return JsonResponse({
         "order_id": order.id,
         "payment_status": payment_status,
@@ -105,8 +158,10 @@ def stripe_success(request):
         "order_status": order.status,
         "session_id": session_id
     })
-
-
+    
+    
+    
+    
 # ------------------ STRIPE CANCEL ------------------
 @csrf_exempt
 def stripe_cancel(request):
@@ -129,6 +184,9 @@ def stripe_cancel(request):
             f"Your payment was cancelled.\n"
             f"You can try again → /checkout"
         )
+        # Send message asynchronously via Celery task
         send_telegram_message_task.delay(chat_id=order.chat_id, text=msg)
 
+
+    # send to display in browser as json
     return JsonResponse({"status": "cancelled", "order_id": order.id})

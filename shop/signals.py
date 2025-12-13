@@ -1,15 +1,21 @@
+# shop/signals.py
+
+import os
+import requests
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
 from .models import Order, OrderItem
-import requests
-import os
+from telegram import Bot
+
+
 
 try:
-    from telegram import Bot
     bot = Bot(token=settings.BOT_TOKEN)
 except Exception:
     bot = None
+
+
 
 @receiver(post_save, sender=Order)
 def notify_merchant_on_order(sender, instance: Order, created, **kwargs):
@@ -41,3 +47,30 @@ def notify_merchant_on_order(sender, instance: Order, created, **kwargs):
     except Exception as e:
         # optional: log or pass
         print("Failed to notify merchant:", e)
+        
+        
+        
+        
+
+
+bot = Bot(token=settings.BOT_TOKEN)
+
+@receiver(post_save, sender=Order)
+def send_status_update(sender, instance, **kwargs):
+    
+    """Whenever admin changes order status in Django admin →  Telegram bot sends message automatically."""
+   
+    status_text = {
+        "pending": "⏳ Your order is waiting for confirmation.",
+        "accepted": "🧑‍🍳 Your order is now being prepared.",
+        "shipped": "🚚 Your order is on the way to you.",
+        "done": "✅ Your order has been delivered. Thank you!",
+        "cancelled": "❌ Your order was cancelled.",
+    }
+
+    bot.send_message(
+        chat_id=instance.chat_id,
+        text=f"🔔 *Order Update*\nOrder #{instance.id}\n{status_text.get(instance.status, '')}",
+        parse_mode="Markdown"
+    )
+

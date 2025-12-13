@@ -173,17 +173,34 @@ PAYMENT_CURRENCY="usd"
 
 
 # TELEGRAM_BOT
+# Telegram -- https://t.me/BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
+# MYFATOORAH -- https://docs.myfatoorah.com/docs/api-key#test-demo-token
+MYFATOORAH_TEST_TOKEN=os.getenv("MYFATOORAH_TEST_TOKEN")
+
 # STRIPE
+# # https://dashboard.stripe.com/acct_1NRKjDGdnvcxF6p4/test/apikeys 
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+# https://docs.stripe.com/testing#cards
+
 # STRIPE_WEBHOOK_SECRET    -- from Stripe Dashboard > Developers > Webhooks (after you create a webhook endpoint)
+# WEBHOOK - development 
+# https://docs.stripe.com/development/dashboard/webhooks
+# https://docs.stripe.com/workbench/event-destinations#create-webhook-endpoint
+# https://docs.stripe.com/stripe-cli/install?install-method=windows
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 
+# WEBHOOK - production
+# https://dashboard.stripe.com/---/test/workbench/webhooks/create
+# STRIPE_WEBHOOK_SECRET=
+
+
 # CELERY
+# https://docs.celeryq.dev/en/v5.3.4/index.html
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']

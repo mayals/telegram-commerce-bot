@@ -1,65 +1,45 @@
 # shop/signals.py
 
-import os
-import requests
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
-from .models import Order, OrderItem
 from telegram import Bot
 
+from .models import Order
+from .tasks import notify_merchant_task
 
 
+# --------------------------------------------------
+# Create Telegram Bot ONCE
+# --------------------------------------------------
 try:
     bot = Bot(token=settings.BOT_TOKEN)
-except Exception:
+except Exception as e:
     bot = None
+    print("❌ Telegram bot init failed:", e)
 
 
-
+# --------------------------------------------------
+# Order status change handler
+# --------------------------------------------------
 @receiver(post_save, sender=Order)
-def notify_merchant_on_order(sender, instance: Order, created, **kwargs):
+def order_status_changed(sender, instance: Order, created, **kwargs):
     """
-    When an order is created, notify merchant chat ID with order summary.
+    Fires on every Order save.
+    - If created: do nothing
+    - If updated:
+        • Notify customer about status
+        • Notify merchant ONLY when payment is successful (status='done')
     """
-    if not created:
+
+    if created:
         return
 
-    merchant_chat = getattr(settings, "MERCHANT_CHAT_ID", None)
-    if not merchant_chat or not bot:
-        return
+    print(f"🔄 Order #{instance.id} updated → status = {instance.status}")
 
-    # Build message text
-    items = OrderItem.objects.filter(order=instance)
-    lines = [f"🆕 New Order #{instance.id}"]
-    lines.append(f"Customer: {instance.customer_name or '—'}")
-    lines.append(f"Phone: {instance.phone or '—'}")
-    lines.append(f"Address: {instance.address or '—'}")
-    lines.append(f"Total: {instance.total}")
-    lines.append("Items:")
-    for it in items:
-        lines.append(f"- {it.product.name} x{it.quantity} @ {it.price}")
-
-    message = "\n".join(lines)
-
-    try:
-        bot.send_message(chat_id=merchant_chat, text=message)
-    except Exception as e:
-        # optional: log or pass
-        print("Failed to notify merchant:", e)
-        
-        
-        
-        
-
-
-bot = Bot(token=settings.BOT_TOKEN)
-
-@receiver(post_save, sender=Order)
-def send_status_update(sender, instance, **kwargs):
-    
-    """Whenever admin changes order status in Django admin →  Telegram bot sends message automatically."""
-   
+    # --------------------------------------------------
+    # 1️⃣ Notify CUSTOMER about status update
+    # --------------------------------------------------
     status_text = {
         "pending": "⏳ Your order is waiting for confirmation.",
         "accepted": "🧑‍🍳 Your order is now being prepared.",
@@ -68,9 +48,38 @@ def send_status_update(sender, instance, **kwargs):
         "cancelled": "❌ Your order was cancelled.",
     }
 
-    bot.send_message(
-        chat_id=instance.chat_id,
-        text=f"🔔 *Order Update*\nOrder #{instance.id}\n{status_text.get(instance.status, '')}",
-        parse_mode="Markdown"
-    )
+    if bot and instance.chat_id:
+        try:
+            bot.send_message(
+                chat_id=instance.chat_id,
+                text=(
+                    f"🔔 <b>Order Update</b>\n\n"
+                    f"🧾 <b>Order ID:</b> {instance.id}\n"
+                    f"{status_text.get(instance.status, '')}"
+                ),
+                parse_mode="HTML"
+            )
+            print("✅ Customer notified")
+        except Exception as e:
+            print("❌ Failed to notify customer:", e)
 
+    # --------------------------------------------------
+    # 2️⃣ Notify MERCHANT only when PAID
+    # --------------------------------------------------
+    if instance.status == "done":
+        print("📤 Sending PAID order to merchant")
+
+        lines = [
+            f"💰 <b>PAID ORDER #{instance.id}</b>",
+            f"👤 Customer: {instance.customer_name or '—'}",
+            f"📞 Phone: {instance.phone or '—'}",
+            f"📍 Address: {instance.address or '—'}",
+            f"💵 Total: {instance.total}",
+            "",
+            "🧾 <b>Items:</b>"
+        ]
+
+        for item in instance.items.all():
+            lines.append(f"- {item.product.name} x{item.quantity}")
+
+        notify_merchant_task.delay("\n".join(lines))

@@ -19,13 +19,12 @@ If Celery imports bot.py → event loop breaks."""
 import requests
 from celery import shared_task
 from django.conf import settings
-from celery import shared_task
 import requests
 import json
 import html
 
 
-TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
+# TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
@@ -44,13 +43,33 @@ def send_telegram_message_task(self, chat_id, text, reply_markup=None):
         url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
 
         resp = requests.post(url, json=payload, timeout=30)
+        print("send_telegram_message_task-resp:", resp)
+
 
         # 🔍 LOG TELEGRAM ERROR MESSAGE
         if resp.status_code != 200:
-            print("Telegram response:", resp.text)
+            print("Telegram response-resp.test:", resp.text)
 
         resp.raise_for_status()
         return resp.json()
 
     except requests.exceptions.RequestException as e:
         raise self.retry(exc=e)
+    
+    
+    
+    
+    
+@shared_task
+def notify_merchant_task(text):
+    
+    url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+    
+    payload = {
+            "chat_id": settings.MERCHANT_CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML",
+    }
+    requests.post(url, json=payload) 
+    print("notify_merchant_task-res=",requests.post(url, json=payload) )
+        

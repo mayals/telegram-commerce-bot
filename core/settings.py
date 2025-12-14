@@ -208,3 +208,9 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
+
+# ADMIN/MERCHANT chat_id 
+"""async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat.id
+    print("MERCHANT_CHAT_ID:", chat_id) """
+MERCHANT_CHAT_ID = os.getenv('MERCHANT_CHAT_ID')

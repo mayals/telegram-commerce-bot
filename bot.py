@@ -139,6 +139,7 @@ async def send_delivery_status(chat_id, order_id, context: ContextTypes.DEFAULT_
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
+    print("MERCHANT_CHAT_ID:", chat_id) 
 
     # ---------- 1) Send Shop Logo ----------
     logo_path = "static/images/logo.jpg"   # put your logo file in static/images folder

@@ -520,6 +520,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_delivery_status(chat_id, order_id, context)
         return
 
+    # from payment/views.py ---  reply_markup  -- callback_data
+    if data == "shop":
+        categories = await sync_to_async(list)(Category.objects.all())
+        buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
+
+        # Send as a new message instead of editing old one
+        await query.message.reply_text(
+            "🛒 Choose a category:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
 
 

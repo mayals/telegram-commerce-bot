@@ -66,20 +66,20 @@ def order_status_changed(sender, instance: Order, created, **kwargs):
     # --------------------------------------------------
     # 2️⃣ Notify MERCHANT only when PAID
     # --------------------------------------------------
-    if instance.status == "done":
-        print("📤 Sending PAID order to merchant")
+    if instance.status != "done":
+        return
 
-        lines = [
-            f"💰 <b>PAID ORDER #{instance.id}</b>",
-            f"👤 Customer: {instance.customer_name or '—'}",
-            f"📞 Phone: {instance.phone or '—'}",
-            f"📍 Address: {instance.address or '—'}",
-            f"💵 Total: {instance.total}",
-            "",
-            "🧾 <b>Items:</b>"
-        ]
+    lines = [
+        f"💰 <b>PAID ORDER #{instance.id}</b>",
+        f"👤 Customer: {instance.customer_name or '—'}",
+        f"📞 Phone: {instance.phone or '—'}",
+        f"📍 Address: {instance.address or '—'}",
+        f"💵 Total: {instance.total}",
+        "",
+        "🧾 <b>Items:</b>"
+    ]
 
-        for item in instance.items.all():
-            lines.append(f"- {item.product.name} x{item.quantity}")
+    for item in instance.items.all():
+        lines.append(f"- {item.product.name} x{item.quantity}")
 
-        notify_merchant_task.delay("\n".join(lines))
+    notify_merchant_task.delay("\n".join(lines))

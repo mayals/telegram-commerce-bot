@@ -1,5 +1,6 @@
 # bot.py
 
+import re
 import os
 import django
 import logging
@@ -31,6 +32,14 @@ from shop.models import Category, Product, Order, OrderItem
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")
 user_carts = {}  # {chat_id: {product_id: qty}}
+
+
+
+
+# ------------------ REGEX ------------------
+PHONE_REGEX = re.compile(r"^\+?\d{7,15}$")
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+NAME_REGEX = re.compile(r"^[A-Za-z\s]{2,}$")
 
 
 
@@ -132,6 +141,8 @@ async def send_delivery_status(chat_id, order_id, context: ContextTypes.DEFAULT_
 
 
 
+
+
 # ------------------ Commands ------------------
 
 # async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -219,27 +230,82 @@ async def checkout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return NAME
 
 async def checkout_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["name"] = update.message.text.strip()
+    name = update.message.text.strip()
+
+    if not NAME_REGEX.match(name):
+        await safe_send_text(
+            update.message.chat.id,
+            context,
+            "❌ Invalid name.\nPlease enter a valid *full name* (letters only):",
+            parse_mode="Markdown"
+        )
+        return NAME
+
+    context.user_data["name"] = name
     await safe_send_text(update.message.chat.id, context, "📱 Please enter your phone number:")
     return PHONE
 
+
+
+
 async def checkout_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["phone"] = update.message.text.strip()
+    phone = update.message.text.strip()
+
+    if not PHONE_REGEX.match(phone):
+        await safe_send_text(
+            update.message.chat.id,
+            context,
+            "❌ Invalid phone number.\n"
+            "Please enter a valid number.\n"
+            "Example: +966501234567"
+        )
+        return PHONE
+
+    context.user_data["phone"] = phone
     await safe_send_text(update.message.chat.id, context, "📍 Please enter your address:")
     return ADDRESS
 
+
+
 async def checkout_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["address"] = update.message.text.strip()
-    await safe_send_text(update.message.chat.id, context, "📧 (Optional) Enter your email or type /skip")
+    address = update.message.text.strip()
+
+    if len(address) < 5:
+        await safe_send_text(
+            update.message.chat.id,
+            context,
+            "❌ Address is too short.\nPlease enter a valid address:"
+        )
+        return ADDRESS
+
+    context.user_data["address"] = address
+    await safe_send_text(
+        update.message.chat.id,
+        context,
+        "📧 (Optional) Enter your email or type /skip"
+    )
     return EMAIL
 
+
 async def checkout_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["email"] = update.message.text.strip()
+    email = update.message.text.strip()
+
+    if not EMAIL_REGEX.match(email):
+        await safe_send_text(
+            update.message.chat.id,
+            context,
+            "❌ Invalid email format.\nExample: user@example.com\nOr type /skip"
+        )
+        return EMAIL
+
+    context.user_data["email"] = email
     return await checkout_confirm_msg(update, context)
+
 
 async def skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["email"] = None
     return await checkout_confirm_msg(update, context)
+
 
 async def checkout_confirm_msg(src, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data

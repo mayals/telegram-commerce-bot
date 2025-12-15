@@ -59,17 +59,19 @@ def send_telegram_message_task(self, chat_id, text, reply_markup=None):
     
     
     
-    
 @shared_task
 def notify_merchant_task(text):
-    
     url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
-    
+
     payload = {
-            "chat_id": settings.MERCHANT_CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
+        "chat_id": settings.MERCHANT_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
     }
-    requests.post(url, json=payload) 
-    print("notify_merchant_task-res=",requests.post(url, json=payload) )
-        
+
+    response = requests.post(url, json=payload)
+    print("notify_merchant_task response:", response.json())
+
+
+
+

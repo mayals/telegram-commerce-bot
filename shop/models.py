@@ -1,5 +1,9 @@
 from django.db import models
 from django.utils import timezone
+# validation
+import re
+from django.core.exceptions import ValidationError
+
 
 
 class Category(models.Model):
@@ -23,6 +27,17 @@ class Product(models.Model):
     def __str__(self):
         return f"{self.name} ({self.price} SAR)"
 
+    def clean(self):
+        if self.price < 0:
+            raise ValidationError({"price": "Price cannot be negative."})
+        if self.stock < 0:
+            raise ValidationError({"stock": "Stock cannot be negative."})
+        if not self.name.strip():
+            raise ValidationError({"name": "Product name cannot be empty."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Order(models.Model):
@@ -55,6 +70,33 @@ class Order(models.Model):
         return f"Order #{self.id} - {self.status} - {self.total} SAR"
 
 
+    def clean(self):
+        # 1️⃣ Name validation (letters and spaces, min 2 chars)
+        if self.customer_name:
+            if not re.match(r"^[A-Za-z\s]{2,}$", self.customer_name):
+                raise ValidationError({"customer_name": "Name must contain letters only and at least 2 characters."})
+
+        # 2️⃣ Phone validation (7–15 digits, optional +)
+        if self.phone:
+            if not re.match(r"^\+?\d{7,15}$", self.phone):
+                raise ValidationError({"phone": "Invalid phone number format."})
+
+        # 3️⃣ Email validation (optional)
+        if self.email:
+            if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", self.email):
+                raise ValidationError({"email": "Invalid email format."})
+
+        # 4️⃣ Address validation (min 5 chars)
+        if self.address and len(self.address.strip()) < 5:
+            raise ValidationError({"address": "Address is too short."})
+
+    def save(self, *args, **kwargs):
+        # Ensure validation runs on save
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
@@ -64,3 +106,20 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} × {self.product.name} (Order #{self.order.id})"
+
+    def clean(self):
+        # Quantity must be at least 1
+        if self.quantity < 1:
+            raise ValidationError({"quantity": "Quantity must be at least 1."})
+        
+        # Price must be >= 0
+        if self.price < 0:
+            raise ValidationError({"price": "Price cannot be negative."})
+
+        # Stock check
+        if self.product and self.quantity > self.product.stock:
+            raise ValidationError({"quantity": f"Quantity exceeds available stock ({self.product.stock})."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

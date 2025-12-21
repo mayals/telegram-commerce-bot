@@ -1,5 +1,5 @@
 # bot.py
-
+#  to start the bot  - in terminal use "python bot.py"
 import re
 import os
 import django
@@ -217,6 +217,22 @@ async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("Loading cart...")
     await send_cart_message(chat_id, msg, context)
 
+
+# Any random text → behave like /start
+async def fallback_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await safe_send_text(
+        update.message.chat.id,
+        context,
+        "👋 Welcome! Let me guide you 👇"
+    )
+    await start(update, context)
+
+
+
+
+
+
+
 # ------------------ Checkout Conversation ------------------
 NAME, PHONE, ADDRESS, EMAIL, CONFIRM = range(5)
 
@@ -244,7 +260,6 @@ async def checkout_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = name
     await safe_send_text(update.message.chat.id, context, "📱 Please enter your phone number:")
     return PHONE
-
 
 
 
@@ -328,9 +343,6 @@ async def checkout_confirm_msg(src, context: ContextTypes.DEFAULT_TYPE):
     else:
         await src.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
     return CONFIRM
-
-
-
 
 
 
@@ -548,6 +560,10 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("shop", shop))
     app.add_handler(CommandHandler("cart", cart_cmd))
+    # Fallback: any random text goes to /start
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_to_start))
+        
+    
 
     # Checkout conversation
     conv_handler = ConversationHandler(

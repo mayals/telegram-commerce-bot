@@ -1,20 +1,32 @@
 # bot.py
 #  to start the bot  - in terminal use "python bot.py"
-import re
 import os
 import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")  # adjust to your settings module
+django.setup()
+
+import re
 import logging
 from decimal import Decimal
 from io import BytesIO
-
+from asgiref.sync import sync_to_async
+from shop.services.cart_service import get_or_create_active_cart, add_product_to_cart, get_cart_item
+from shop.models import CartItem
 import httpx
 from PIL import Image
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, ContextTypes, filters
 )
-from asgiref.sync import sync_to_async
+
+    
+
+
+
+
 
 # ------------------ Logging ------------------
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +43,7 @@ from shop.models import Category, Product, Order, OrderItem
 # ------------------ Globals ------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")
-user_carts = {}  # {chat_id: {product_id: qty}}
+
 
 
 
@@ -46,7 +58,6 @@ NAME_REGEX = re.compile(r"^[A-Za-z\s]{2,}$")
 
 
 # ------------------ Helpers ------------------
-
 async def resize_image_for_telegram(image_path):
     """Return a BytesIO JPEG suitable for Telegram (or None on failure)."""
     try:
@@ -75,10 +86,15 @@ async def safe_send_text(chat_id, context: ContextTypes.DEFAULT_TYPE, text, repl
         logger.error("Failed to send message to %s: %s", chat_id, e)
 
 
+
 async def send_cart_message(chat_id, message_obj, context):
-    """Compose and send/edit cart message."""
-    cart = user_carts.get(chat_id, {})
-    if not cart:
+    # 1️⃣ Get cart
+    cart = await get_or_create_active_cart(chat_id)  # already async
+
+    # 2️⃣ Fetch items with related products
+    items = await sync_to_async(lambda: list(CartItem.objects.filter(cart=cart).select_related('product')))()
+
+    if not items:
         try:
             await message_obj.edit_text("🛒 Your cart is empty.")
         except Exception:
@@ -89,24 +105,14 @@ async def send_cart_message(chat_id, message_obj, context):
     total = Decimal("0.00")
     keyboard = []
 
-    products = {}
-    for pid in list(cart.keys()):
-        try:
-            products[pid] = await sync_to_async(Product.objects.get)(id=pid)
-        except Product.DoesNotExist:
-            cart.pop(pid, None)
-
-    for pid, qty in cart.items():
-        product = products.get(pid)
-        if not product:
-            continue
-        subtotal = product.price * qty
+    for item in items:
+        subtotal = item.price * item.quantity
         total += subtotal
-        lines.append(f"{product.name} x{qty} = ${subtotal:.2f}")
+        lines.append(f"{item.product.name} x{item.quantity} = ${subtotal:.2f}")
         keyboard.append([
-            InlineKeyboardButton("➕", callback_data=f"inc_{pid}"),
-            InlineKeyboardButton("➖", callback_data=f"dec_{pid}"),
-            InlineKeyboardButton("Remove", callback_data=f"rm_{pid}")
+            InlineKeyboardButton("➕", callback_data=f"inc_{item.product.id}"),
+            InlineKeyboardButton("➖", callback_data=f"dec_{item.product.id}"),
+            InlineKeyboardButton("Remove", callback_data=f"rm_{item.product.id}")
         ])
 
     lines.append(f"\n*Total:* ${total:.2f}")
@@ -120,6 +126,10 @@ async def send_cart_message(chat_id, message_obj, context):
         await safe_send_text(chat_id, context, text, reply_markup=markup, parse_mode="Markdown")
 
 
+
+            
+            
+            
 # ------------------ Delivery Helper ------------------
 async def send_delivery_status(chat_id, order_id, context: ContextTypes.DEFAULT_TYPE):
     from delivery.models import Delivery
@@ -210,16 +220,25 @@ async def shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
-    cart = user_carts.get(chat_id, {})
-    if not cart:
+
+    cart = await sync_to_async(get_or_create_active_cart)(chat_id)
+    items = await sync_to_async(cart.items.exists)()
+
+    if not items:
         await safe_send_text(chat_id, context, "🛒 Your cart is empty.")
         return
+
     msg = await update.message.reply_text("Loading cart...")
     await send_cart_message(chat_id, msg, context)
 
 
+
 # Any random text → behave like /start
 async def fallback_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('in_conversation'):
+        # Let the conversation continue
+        return
+    
     await safe_send_text(
         update.message.chat.id,
         context,
@@ -237,13 +256,28 @@ async def fallback_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 NAME, PHONE, ADDRESS, EMAIL, CONFIRM = range(5)
 
 async def checkout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat.id
-    cart = user_carts.get(chat_id, {})
-    if not cart:
+    context.user_data['in_conversation'] = True
+
+    # Support both message and callback query
+    if update.message:
+        chat_id = update.message.chat.id
+    elif update.callback_query:
+        chat_id = update.callback_query.message.chat.id
+        await update.callback_query.answer()  # Answer the button to remove "loading" circle
+    else:
+        return ConversationHandler.END  # Should never happen
+
+    from shop.services.cart_service import get_or_create_active_cart
+    cart = await get_or_create_active_cart(chat_id)
+
+    if not cart or not await sync_to_async(cart.items.exists)():
         await safe_send_text(chat_id, context, "🛒 Your cart is empty. Add products first.")
         return ConversationHandler.END
+
     await safe_send_text(chat_id, context, "Please enter your *full name*:", parse_mode="Markdown")
     return NAME
+
+
 
 async def checkout_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
@@ -347,13 +381,17 @@ async def checkout_confirm_msg(src, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_conversation'] = False
     query = update.callback_query
     await query.answer()
+    
     chat_id = query.message.chat.id
     data = context.user_data
-    cart = user_carts.get(chat_id, {})
+    
+    cart = await get_or_create_active_cart(chat_id)
+    items = await sync_to_async(list)(cart.items.select_related("product"))
 
-    if not cart:
+    if not items:
         await safe_send_text(chat_id, context, "Your cart is empty. Use /shop to start again.")
         return ConversationHandler.END
 
@@ -367,20 +405,19 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     total = Decimal("0.00")
-    for pid, qty in list(cart.items()):
-        try:
-            product = await sync_to_async(Product.objects.get)(id=pid)
-        except Product.DoesNotExist:
-            continue
-        subtotal = product.price * qty
-        total += subtotal
-        await sync_to_async(OrderItem.objects.create)(
-            order=order, product=product, quantity=qty, price=product.price
-        )
 
+    for item in items:
+        subtotal = item.price * item.quantity
+        total += subtotal
+
+        await sync_to_async(OrderItem.objects.create)( order=order,product=item.product, quantity=item.quantity,price=item.price)
+              
     order.total = total
     await sync_to_async(order.save)()
-    user_carts[chat_id] = {}
+
+    cart.is_active = False
+    await sync_to_async(cart.save)()
+
 
     # 2️⃣ Call Django create_checkout_session (Stripe)
     try:
@@ -464,11 +501,16 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat.id
     data = query.data
 
-    # Category
+    # Let ConversationHandler handle checkout
+    if data == "checkout_now":
+        return  # DO NOT handle here, ConversationHandler will catch it
+
+    await query.answer()
+    chat_id = query.message.chat.id
+
+    # ---------- Category ----------
     if data.startswith("cat_"):
         cat_id = data.split("_", 1)[1]
         products = await sync_to_async(list)(Product.objects.filter(category_id=cat_id, is_active=True))
@@ -479,7 +521,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📦 Products in this category:", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # Product
+    
+    # ---------- Product ----------
     if data.startswith("prod_"):
         prod_id = data.split("_", 1)[1]
         product = await sync_to_async(Product.objects.get)(id=prod_id)
@@ -499,75 +542,75 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # Cart operations
+
+    # ---------- Cart Operations ----------
     if data.startswith(("add_", "inc_", "dec_", "rm_")):
         op, prod_id = data.split("_", 1)
-        prod_id = prod_id
-        cart = user_carts.get(chat_id, {})
-        if op == "add" or op == "inc":
-            cart[prod_id] = cart.get(prod_id, 0) + 1
-        elif op == "dec":
-            if cart.get(prod_id, 0) > 1:
-                cart[prod_id] -= 1
-            else:
-                cart.pop(prod_id, None)
-        elif op == "rm":
-            cart.pop(prod_id, None)
-        user_carts[chat_id] = cart
+        cart = await get_or_create_active_cart(chat_id)
+        item = await get_cart_item(cart, prod_id)
+
+        if op in ("add", "inc"):
+            await add_product_to_cart(cart, prod_id, 1)
+
+        if item:
+            if op == "dec":
+                if item.quantity > 1:
+                    item.quantity -= 1
+                    await sync_to_async(item.save)()
+                else:
+                    await sync_to_async(item.delete)()
+            elif op == "rm":
+                await sync_to_async(item.delete)()
+
+        msg = query.message
+        await send_cart_message(chat_id, msg, context)
+        return
+        
+
+        # Send updated cart message
         await send_cart_message(chat_id, query.message, context)
         return
 
-    if data == "checkout_now":
-        await safe_send_text(chat_id, context, "🛒 To finish checkout, please type /checkout")
-        return
 
+    # ---------- Back to categories ----------
     if data == "back_cats":
         categories = await sync_to_async(list)(Category.objects.all())
         buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
         await query.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
-
+        return
     
+    # ---------- Track Order ----------
     if data.startswith("track_"):
         order_id = data.split("_")[1]
         await send_delivery_status(chat_id, order_id, context)
         return
 
     # from payment/views.py ---  reply_markup  -- callback_data
+    # ---------- Shop button ----------
     if data == "shop":
         categories = await sync_to_async(list)(Category.objects.all())
         buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
-
-        # Send as a new message instead of editing old one
-        await query.message.reply_text(
-            "🛒 Choose a category:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await query.message.reply_text("🛒 Choose a category:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
 
 
 
 
 
 # ------------------ Startup ------------------
-
 def main():
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not found in environment variables.")
+        print("BOT_TOKEN not found in environment variables.")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("shop", shop))
-    app.add_handler(CommandHandler("cart", cart_cmd))
-    # Fallback: any random text goes to /start
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_to_start))
-        
-    
-
-    # Checkout conversation
+    # --- ConversationHandler for checkout ---
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("checkout", checkout_start)],
+        entry_points=[
+            CommandHandler("checkout", checkout_start),
+            CallbackQueryHandler(checkout_start, pattern="^checkout_now$")
+        ],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_name)],
             PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_phone)],
@@ -576,18 +619,30 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, checkout_email),
                 CommandHandler("skip", skip_email)
             ],
-            CONFIRM: [CallbackQueryHandler(checkout_confirm, pattern="^confirm_checkout$"),
-                      CallbackQueryHandler(checkout_cancel, pattern="^cancel_checkout$")]
+            CONFIRM: [
+                CallbackQueryHandler(checkout_confirm, pattern="^confirm_checkout$"),
+                CallbackQueryHandler(checkout_cancel, pattern="^cancel_checkout$")
+            ],
         },
-        fallbacks=[CommandHandler("cancel", checkout_cancel)],
+        fallbacks=[CommandHandler("cancel", checkout_cancel)]
     )
-    app.add_handler(conv_handler)
 
-    # Callback
+    # --- Add handlers in proper order ---
+    app.add_handler(conv_handler)  # MUST come before the generic button handler
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("🤖 Bot running...")
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("shop", shop))
+    app.add_handler(CommandHandler("cart", cart_cmd))
+
+    # Fallback for random text
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_to_start))
+
+    print("🤖 Bot running...")
     app.run_polling()
 
+    
+    
 if __name__ == "__main__":
     main()

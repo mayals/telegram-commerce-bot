@@ -175,6 +175,7 @@ PAYMENT_CURRENCY="usd"
 # TELEGRAM_BOT
 # Telegram -- https://t.me/BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+DJANGO_SETTINGS_MODULE = os.getenv("DJANGO_SETTINGS_MODULE")
 
 
 # MYFATOORAH -- https://docs.myfatoorah.com/docs/api-key#test-demo-token

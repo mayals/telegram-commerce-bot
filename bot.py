@@ -110,9 +110,16 @@ async def send_cart_message(chat_id, message_obj, context):
         total += subtotal
         lines.append(f"{item.product.name} x{item.quantity} = ${subtotal:.2f}")
         keyboard.append([
+            InlineKeyboardButton(
+                f"🛒 {item.product.name} (x{item.quantity})",
+                callback_data="noop"
+            )
+        ])
+
+        keyboard.append([
             InlineKeyboardButton("➕", callback_data=f"inc_{item.product.id}"),
             InlineKeyboardButton("➖", callback_data=f"dec_{item.product.id}"),
-            InlineKeyboardButton("Remove", callback_data=f"rm_{item.product.id}")
+            InlineKeyboardButton("❌", callback_data=f"rm_{item.product.id}")
         ])
 
     lines.append(f"\n*Total:* ${total:.2f}")
@@ -220,7 +227,6 @@ async def shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
-
     cart = await sync_to_async(get_or_create_active_cart)(chat_id)
     items = await sync_to_async(cart.items.exists)()
 
@@ -239,11 +245,8 @@ async def fallback_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Let the conversation continue
         return
     
-    await safe_send_text(
-        update.message.chat.id,
-        context,
-        "👋 Welcome! Let me guide you 👇"
-    )
+    await safe_send_text(update.message.chat.id,context, "👋 Welcome! Let me guide you 👇")
+   
     await start(update, context)
 
 
@@ -283,12 +286,7 @@ async def checkout_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
 
     if not NAME_REGEX.match(name):
-        await safe_send_text(
-            update.message.chat.id,
-            context,
-            "❌ Invalid name.\nPlease enter a valid *full name* (letters only):",
-            parse_mode="Markdown"
-        )
+        await safe_send_text(update.message.chat.id, context, "❌ Invalid name.\nPlease enter a valid *full name* (letters only):",parse_mode="Markdown" )
         return NAME
 
     context.user_data["name"] = name
@@ -301,13 +299,7 @@ async def checkout_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
 
     if not PHONE_REGEX.match(phone):
-        await safe_send_text(
-            update.message.chat.id,
-            context,
-            "❌ Invalid phone number.\n"
-            "Please enter a valid number.\n"
-            "Example: +966501234567"
-        )
+        await safe_send_text(update.message.chat.id, context,"❌ Invalid phone number.\n""Please enter a valid number.\n" "Example: +966501234567" )
         return PHONE
 
     context.user_data["phone"] = phone
@@ -320,19 +312,11 @@ async def checkout_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     address = update.message.text.strip()
 
     if len(address) < 5:
-        await safe_send_text(
-            update.message.chat.id,
-            context,
-            "❌ Address is too short.\nPlease enter a valid address:"
-        )
+        await safe_send_text(update.message.chat.id, context, "❌ Address is too short.\nPlease enter a valid address:")
         return ADDRESS
 
     context.user_data["address"] = address
-    await safe_send_text(
-        update.message.chat.id,
-        context,
-        "📧 (Optional) Enter your email or type /skip"
-    )
+    await safe_send_text(update.message.chat.id,context,"📧 (Optional) Enter your email or type /skip")
     return EMAIL
 
 
@@ -340,11 +324,7 @@ async def checkout_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email = update.message.text.strip()
 
     if not EMAIL_REGEX.match(email):
-        await safe_send_text(
-            update.message.chat.id,
-            context,
-            "❌ Invalid email format.\nExample: user@example.com\nOr type /skip"
-        )
+        await safe_send_text(update.message.chat.id,context,"❌ Invalid email format.\nExample: user@example.com\nOr type /skip" )
         return EMAIL
 
     context.user_data["email"] = email
@@ -440,8 +420,28 @@ async def checkout_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def checkout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("Checkout cancelled.")
+    await query.answer()
+
+    # 🔄 Reset conversation flag
+    context.user_data['in_conversation'] = False
+
+    # 🧹 Clear checkout data (optional but clean)
+    for key in ("name", "phone", "address", "email"):
+        context.user_data.pop(key, None)
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 Continue Shopping", callback_data="shop")],
+        [InlineKeyboardButton("🧺 View Cart", callback_data="view_cart")]
+    ])
+
+    await query.edit_message_text(
+        "❌ *Checkout cancelled.*\n\nWhat would you like to do next?",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
     return ConversationHandler.END
+
 
 
 
@@ -449,7 +449,6 @@ async def checkout_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def track_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_user.id
-
     order = await sync_to_async(Order.objects.filter(chat_id=chat_id).order_by('-created_at').first)()
 
     if not order:
@@ -497,7 +496,7 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-# ------------------ Callback Handler ------------------
+# ------------------ Callback Handler --- button_handler ------------------
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -546,28 +545,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---------- Cart Operations ----------
     if data.startswith(("add_", "inc_", "dec_", "rm_")):
         op, prod_id = data.split("_", 1)
+
         cart = await get_or_create_active_cart(chat_id)
         item = await get_cart_item(cart, prod_id)
 
         if op in ("add", "inc"):
             await add_product_to_cart(cart, prod_id, 1)
 
-        if item:
-            if op == "dec":
-                if item.quantity > 1:
-                    item.quantity -= 1
-                    await sync_to_async(item.save)()
-                else:
-                    await sync_to_async(item.delete)()
-            elif op == "rm":
+        elif op == "dec" and item:
+            if item.quantity > 1:
+                item.quantity -= 1
+                await sync_to_async(item.save)()
+            else:
                 await sync_to_async(item.delete)()
 
-        msg = query.message
-        await send_cart_message(chat_id, msg, context)
-        return
-        
+        elif op == "rm" and item:
+            await sync_to_async(item.delete)()
 
-        # Send updated cart message
         await send_cart_message(chat_id, query.message, context)
         return
 
@@ -578,6 +572,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons = [[InlineKeyboardButton(c.name, callback_data=f"cat_{c.id}")] for c in categories]
         await query.message.reply_text("Choose category:", reply_markup=InlineKeyboardMarkup(buttons))
         return
+    
     
     # ---------- Track Order ----------
     if data.startswith("track_"):
@@ -594,9 +589,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-
-
-
+    # ---------- View Cart ----------
+    if data == "view_cart":
+        msg = await query.message.reply_text("Loading your cart...")
+        await send_cart_message(chat_id, msg, context)
+        return
+    
+    
+    
+    
+    
 # ------------------ Startup ------------------
 def main():
     if not BOT_TOKEN:

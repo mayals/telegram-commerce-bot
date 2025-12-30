@@ -7,6 +7,7 @@
 
 import os
 import stripe
+from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
@@ -87,7 +88,7 @@ def create_checkout_session(request, order_id):
         payment_method_types=["card"],
         mode="payment",
         line_items=line_items,
-        success_url=f"{settings.BASE_URL}/payment/stripe-success/?session_id={{CHECKOUT_SESSION_ID}}&order_id={order.id}",
+        success_url=f"{settings.BASE_URL}/payment/stripe-success-page/?session_id={{CHECKOUT_SESSION_ID}}&order_id={order.id}",
         cancel_url=f"{settings.BASE_URL}/payment/stripe-cancel/?order_id={order.id}",
     )
 
@@ -162,7 +163,7 @@ def stripe_success(request):
     
     
     
-# ------------------ STRIPE CANCEL ------------------
+# ------------------ STRIPE CANCEL  ------------------
 @csrf_exempt
 def stripe_cancel(request):
     order_id = request.GET.get("order_id")
@@ -190,3 +191,13 @@ def stripe_cancel(request):
 
     # send to display in browser as json
     return JsonResponse({"status": "cancelled", "order_id": order.id})
+
+
+
+
+
+
+
+# render template payment/success.html
+def stripe_success_page(request):
+    return render(request, "payment/success.html")

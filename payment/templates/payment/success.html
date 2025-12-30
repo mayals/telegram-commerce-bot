@@ -1,0 +1,50 @@
+{% comment %} payment/templates/payment/success.html {% endcomment %}
+
+
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payment Successful</title>
+        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.3.3/dist/tailwind.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-gray-100 flex items-center justify-center h-screen">
+        <div class="bg-white shadow-lg rounded-xl p-10 max-w-lg text-center">
+            <h1 class="text-3xl font-bold text-green-600 mb-4">🎉 Payment Successful!</h1>
+            <p class="text-gray-700 mb-2">Order ID: <span id="order_id"></span></p>
+            <p class="text-gray-700 mb-2">Amount: <span id="amount"></span> <span id="currency"></span></p>
+            <p class="text-gray-700 mb-2">Status: <span id="status" class="font-semibold"></span></p>
+
+            <div class="mt-6 flex flex-col gap-3">
+                <a id="track-btn" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600" href="#">🚚 Track Delivery</a>
+                <a id="shop-btn" class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600" href="/shop">🛒 Continue Shopping</a>
+            </div>
+        </div>
+
+        <script>
+            async function loadPaymentData() {
+                const params = new URLSearchParams(window.location.search);
+                const session_id = params.get('session_id');
+                const order_id = params.get('order_id');
+
+                if (!session_id || !order_id) return;
+
+                // Fetch from the JSON endpoint, NOT the HTML template
+                const res = await fetch(`/payment/stripe-success/?session_id=${session_id}&order_id=${order_id}`);
+                console.log("res=",res);
+                if (!res.ok) return;
+                const data = await res.json();
+                console.log("data=",data);
+
+                document.getElementById('order_id').innerText = data.order_id;
+                document.getElementById('amount').innerText = data.amount.toFixed(2);
+                document.getElementById('currency').innerText = data.currency;
+                document.getElementById('status').innerText = data.order_status;
+
+                document.getElementById('track-btn').href = `/track-order/${data.order_id}`;
+            }
+            loadPaymentData();
+        </script>
+
+    </body>
+</html>

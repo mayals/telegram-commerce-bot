@@ -1,4 +1,4 @@
-# tasks.py
+# shop/tasks.py
 """ Your Celery task is calling an async Telegram bot function without awaiting it
 Celery tasks are synchronous, but aiogram/telegram library uses async functions.
 So Celery runs the task, but message is never actually sent."""

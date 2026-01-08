@@ -3,18 +3,25 @@
 import os
 import django
 
+# ✅ Initialize Django FIRST
+# ------------------ Django Setup ------------------
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")  # adjust to your settings module
 django.setup()
 
+
+
+# ------------------ now import the remain -------------------
 import re
 import logging
 from decimal import Decimal
 from io import BytesIO
-from asgiref.sync import sync_to_async
-from shop.services.cart_service import get_or_create_active_cart, add_product_to_cart, get_cart_item
-from shop.models import CartItem
 import httpx
 from PIL import Image
+from asgiref.sync import sync_to_async
+# ✅ NOW it's safe to import Django stuff
+from shop.services.cart_service import get_or_create_active_cart, add_product_to_cart, get_cart_item
+from shop.models import Category, Product, Order, OrderItem, CartItem 
+
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -31,11 +38,6 @@ from telegram.ext import (
 # ------------------ Logging ------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ------------------ Django Setup ------------------
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
-django.setup()
-from shop.models import Category, Product, Order, OrderItem
 
 
 
@@ -241,9 +243,12 @@ async def cart_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Any random text → behave like /start
 async def fallback_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('in_conversation'):
-        # Let the conversation continue
-        return
+    await safe_send_text(
+        update.message.chat.id,
+        context,
+        "👋 I didn’t understand that.\n\nUse /shop to browse products 🛒"
+    )
+
     
     await safe_send_text(update.message.chat.id,context, "👋 Welcome! Let me guide you 👇")
    
@@ -629,16 +634,19 @@ def main():
         fallbacks=[CommandHandler("cancel", checkout_cancel)]
     )
 
-    # --- Add handlers in proper order ---
+    # --- Add handlers in proper order ( the list must not change )---
+    # 1️⃣ Conversation handler FIRST
     app.add_handler(conv_handler)  # MUST come before the generic button handler
-    app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Commands
+    # 2️⃣ Command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("shop", shop))
     app.add_handler(CommandHandler("cart", cart_cmd))
 
-    # Fallback for random text
+    # 3️⃣ Callback buttons LAST
+    app.add_handler(CallbackQueryHandler(button_handler))
+    
+    # 4️⃣ Text fallback for random text LAST OF ALL
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_to_start))
 
     print("🤖 Bot running...")

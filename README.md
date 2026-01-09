@@ -18,6 +18,7 @@ All business logic and data persistence are handled by Django.
 
 🧠 Architecture
 telegram-commerce-bot/
+
 │
 ├── core/                   # Django project settings
 ├── shop/                   # Main app (products, cart, orders)
@@ -131,6 +132,7 @@ Orders
 Cart items
 
 http://127.0.0.1:8000/admin/
+
 
 
 

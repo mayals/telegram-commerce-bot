@@ -139,7 +139,5 @@ http://127.0.0.1:8000/admin/
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
 
-![WhatsApp Image 2026-01-11 at 9 17 36 PM](https://github.com/user-attachments/assets/65aacf8c-1292-4433-85b0-3103bd10ac36)
 
-![WhatsApp Image 2026-01-11 at 9 17 37 PM](https://github.com/user-attachments/assets/9bf50483-aa68-4e7a-a613-22097e1ab0df)
 

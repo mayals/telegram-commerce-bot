@@ -49,7 +49,7 @@ Standalone bot integration with Django
 
 
 
-📦 # Main Python Packages
+# Main Python Packages📦
 Django
 python-telegram-bot
 asgiref
@@ -57,7 +57,7 @@ python-dotenv (optional)
 (See requirements.txt for full list)
 
 
-🚀 How to Run the Project Locally
+# How to Run the Project Locally🚀
 1️⃣ Clone the repository
 git clone https://github.com/mayals/telegram-commerce-bot.git
 cd telegram-commerce-bot
@@ -106,7 +106,7 @@ Order creation
 Database-backed cart system
 Django admin panel for managing products
 
-🧑‍💻 Admin Panel
+## Admin Panel🧑‍💻
 Access Django admin to manage:
 Categories
 Products
@@ -134,6 +134,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

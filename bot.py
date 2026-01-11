@@ -514,16 +514,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     chat_id = query.message.chat.id
 
+
     # ---------- Category ----------
     if data.startswith("cat_"):
         cat_id = data.split("_", 1)[1]
-        products = await sync_to_async(list)(Product.objects.filter(category_id=cat_id, is_active=True))
+
+        category = await sync_to_async(Category.objects.get)(id=cat_id)
+        cat_name = category.name
+
+        products = await sync_to_async(list)(
+            Product.objects.filter(category=category, is_active=True)
+        )
+
         if not products:
             await query.edit_message_text("No products in this category.")
             return
-        buttons = [[InlineKeyboardButton(f"{p.name} - ${p.price}", callback_data=f"prod_{p.id}")] for p in products]
-        await query.edit_message_text("📦 Products in this category:", reply_markup=InlineKeyboardMarkup(buttons))
+
+        buttons = [
+            [InlineKeyboardButton(f"{p.name} - ${p.price}", callback_data=f"prod_{p.id}")]
+            for p in products
+        ]
+
+        await query.edit_message_text(
+            f"📦 Products in **{cat_name}** category:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
+        )
         return
+
 
     
     # ---------- Product ----------

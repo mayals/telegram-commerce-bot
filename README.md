@@ -1,6 +1,6 @@
 🛒 Telegram Commerce Bot (Django + Telegram)
 
-A Telegram-based e-commerce bot built with Django and python-telegram-bot, allowing users to browse products, manage a cart, and place orders directly inside Telegram.
+A Telegram-based e-commerce bot built with Django and python-telegram-bot, allowing users to browse products, manage a cart, and place orders directly inside Telegram and track the order.
 The bot is fully integrated with Django models and services, following clean architecture and separation of concerns.
 
 
@@ -138,6 +138,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

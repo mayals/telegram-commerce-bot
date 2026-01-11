@@ -4,7 +4,7 @@ A Telegram-based e-commerce bot built with Django and python-telegram-bot, allow
 The bot is fully integrated with Django models and services, following clean architecture and separation of concerns.
 
 
-📌 ##Project Overview
+📌 Project Overview
 This project demonstrates how to build a real-world Telegram commerce system using Django as the backend and Telegram as the user interface.
 
 Users can:
@@ -16,10 +16,6 @@ Place orders via Telegram
 checkout and payment modify.
 track his order
 All business logic and data persistence are handled by Django.
-
-
-
-
 
 
 
@@ -138,6 +134,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

@@ -115,7 +115,7 @@ Cart items
 
 http://127.0.0.1:8000/admin/
 
-## telegram bot view
+### telegram bot view
 ![WhatsApp Image 2026-01-11 at 9 17 02 PM](https://github.com/user-attachments/assets/ff668087-8f7e-4867-b2a7-fa0e3a0bb0c3)
 
 ![WhatsApp Image 2026-01-11 at 9 17 30 PM](https://github.com/user-attachments/assets/8c8bed94-5bd1-4846-a10c-65a45e63dfc5)
@@ -134,6 +134,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

@@ -7,7 +7,7 @@ The bot is fully integrated with Django models and services, following clean arc
 ### Project Overview 📌
 This project demonstrates how to build a real-world Telegram commerce system using Django as the backend and Telegram as the user interface.
 
-Users can:
+### Users can:
 Browse product categories
 View products
 Add products to a cart
@@ -19,14 +19,14 @@ All business logic and data persistence are handled by Django.
 
 
 
-Key Design Principles
+### Key Design Principles
 Service Layer Pattern (business logic outside views)
 Django ORM for database access
 Telegram bot as a standalone interface
 Clean separation between bot logic and backend logic
 
 
-⚙️ # Technologies Used
+### Technologies Used ⚙️
 Backend
 Python 3
 Django
@@ -39,17 +39,8 @@ Callback queries
 Stateful user interactions
 
 
-Architecture & Patterns
 
-Service-based architecture
-
-Reusable business logic
-
-Standalone bot integration with Django
-
-
-
-# Main Python Packages📦
+### Main Python Packages📦
 Django
 python-telegram-bot
 asgiref
@@ -57,7 +48,7 @@ python-dotenv (optional)
 (See requirements.txt for full list)
 
 
-# How to Run the Project Locally🚀
+### How to Run the Project Locally🚀
 1️⃣ Clone the repository
 git clone https://github.com/mayals/telegram-commerce-bot.git
 cd telegram-commerce-bot
@@ -96,7 +87,9 @@ python bot.py
 
 ✅ Your bot is now live on Telegram.
 
-🧪 Features Implemented
+
+
+### Features Implemented🧪
 Category listing
 Product listing
 Add to cart
@@ -114,6 +107,9 @@ Orders
 Cart items
 
 http://127.0.0.1:8000/admin/
+
+
+
 
 ### telegram bot view
 ![WhatsApp Image 2026-01-11 at 9 17 02 PM](https://github.com/user-attachments/assets/ff668087-8f7e-4867-b2a7-fa0e3a0bb0c3)
@@ -134,6 +130,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

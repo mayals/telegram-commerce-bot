@@ -26,7 +26,7 @@ Telegram bot as a standalone interface
 Clean separation between bot logic and backend logic
 
 
-⚙️ Technologies Used
+⚙️ # Technologies Used
 Backend
 Python 3
 Django
@@ -49,7 +49,7 @@ Standalone bot integration with Django
 
 
 
-📦 Main Python Packages
+📦 # Main Python Packages
 Django
 python-telegram-bot
 asgiref
@@ -65,7 +65,7 @@ cd telegram-commerce-bot
 2️⃣ Create and activate virtual environment
 python -m venv venv
 venv\Scripts\activate   # Windows
-# source venv/bin/activate  # Linux / Mac
+source venv/bin/activate  # Linux / Mac
 
 3️⃣ Install dependencies
 pip install -r requirements.txt
@@ -134,6 +134,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 

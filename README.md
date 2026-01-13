@@ -82,7 +82,11 @@ Create .env file or set environment variable:
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 DJANGO_SETTINGS_MODULE=core.settings
 
-7️⃣ Run the Telegram Bot
+
+7️⃣Start Celery - in terminal use "celery -A core worker -l info --pool=solo"
+
+
+8️⃣Run the Telegram Bot
 python bot.py
 
 ✅ Your bot is now live on Telegram.
@@ -130,6 +134,7 @@ http://127.0.0.1:8000/admin/
 
 
 ![WhatsApp Image 2026-01-11 at 9 17 35 PM](https://github.com/user-attachments/assets/8e1d3f23-2aaa-4bd8-bdb6-8ccd966de2c8)
+
 
 
 
